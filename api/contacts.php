@@ -1,29 +1,51 @@
 <?php
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(["error" => "Method Not Allowed"]);
+    exit();
+}
 header("Content-Type: application/json");
+
 include "config.php";
 
-$method = $_SERVER['REQUEST_METHOD'];
+$data = json_decode(file_get_contents("php://input"), true);
 
-if ($method === "GET") {
-    $result = $conn->query("SELECT * FROM contacts");
-    $contacts = [];
-    while ($row = $result->fetch_assoc()) {
-        $contacts[] = $row;
-    }
-    echo json_encode($contacts);
+// Check if required fields are present
+if (!isset($data['name']) || !isset($data['email']) || !isset($data['phone'])) {
+    http_response_code(400);
+    echo json_encode(["error" => "Missing required fields"]);
+    exit();
 }
 
-if ($method === "POST") {
-    $data = json_decode(file_get_contents("php://input"), true);
-    $name = $data['name'];
-    $email = $data['email'];
-    $phone = $data['phone'];
+$name = $data['name'];
+$email = $data['email'];
+$phone = $data['phone'];
 
-    $sql = "INSERT INTO contacts (name, email, phone) VALUES ('$name', '$email', '$phone')";
-    if ($conn->query($sql) === TRUE) {
-        echo json_encode(["message" => "Contact created"]);
-    } else {
-        echo json_encode(["error" => "Error: " . $conn->error]);
-    }
+// Look up user_id using email
+$checkUser = $conn->prepare("SELECT id FROM users WHERE email = ?");
+$checkUser->bind_param("s", $email);
+$checkUser->execute();
+$checkUser->store_result();
+$checkUser->bind_result($user_id);
+$checkUser->fetch();
+
+if ($checkUser->num_rows === 0) {
+    http_response_code(400);
+    echo json_encode(["error" => "User email not found"]);
+    exit();
 }
+
+$checkUser->close();
+//finds user id in database to link name/phone to email
+$sql = $conn->prepare("INSERT INTO contacts (name, email, phone, user_id) VALUES (?, ?, ?, ?)");
+$sql->bind_param("sssi", $name, $email, $phone, $user_id);
+
+if ($sql->execute()) {
+    echo json_encode(["message" => "Contact created successfully"]);
+} else {
+    echo json_encode(["error" => "MySQL Error: " . $conn->error]);
+}
+
+$sql->close();
+$conn->close();
 ?>
